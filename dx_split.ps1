@@ -4,12 +4,27 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-if ($OutputDir -eq "." -or $OutputDir -eq ".\") {
-    Write-Host "错误: 输出目录不能是当前目录(.)，否则会覆盖输入文件。"
+function Get-SafeFileName {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Name
+    )
+
+    $safe = $Name
+    foreach ($ch in [System.IO.Path]::GetInvalidFileNameChars()) {
+        $safe = $safe.Replace([string]$ch, "_")
+    }
+    return $safe
+}
+
+if (($OutputDir -eq '.') -or ($OutputDir -eq '.\')) {
+    Write-Host "Error: output directory cannot be current directory (.)."
     exit 1
 }
 
-$outputPath = Join-Path -Path (Get-Location) -ChildPath $OutputDir
+$cwd = (Get-Location).Path
+$outputPath = Join-Path -Path $cwd -ChildPath $OutputDir
+
 if (-not (Test-Path -LiteralPath $outputPath)) {
     New-Item -ItemType Directory -Path $outputPath | Out-Null
 }
@@ -19,19 +34,19 @@ $totalReadLines = 0
 $writtenLines = 0
 $fileLineCounter = @{}
 
-Write-Host "开始处理，输出目录: $outputPath"
+Write-Host "Start processing. Output directory: $outputPath"
 
 $oldFiles = Get-ChildItem -LiteralPath $outputPath -File -Filter "*.csv" -ErrorAction SilentlyContinue
-if ($oldFiles) {
+if ($null -ne $oldFiles -and @($oldFiles).Count -gt 0) {
     $oldCount = @($oldFiles).Count
     $oldFiles | Remove-Item -Force
-    Write-Host "已清理旧输出文件: $oldCount 个"
+    Write-Host "Cleaned old output files: $oldCount"
 }
 
-$inputFiles = Get-ChildItem -LiteralPath (Get-Location) -File -Filter "*.csv"
+$inputFiles = Get-ChildItem -LiteralPath $cwd -File -Filter "*.csv"
 foreach ($csvFile in $inputFiles) {
     $inputFileCount++
-    Write-Host "读取文件: $($csvFile.FullName)"
+    Write-Host "Reading file: $($csvFile.FullName)"
 
     foreach ($line in Get-Content -LiteralPath $csvFile.FullName) {
         $totalReadLines++
@@ -40,20 +55,19 @@ foreach ($csvFile in $inputFiles) {
             continue
         }
 
-        if (-not $line.Contains(",")) {
+        $commaIndex = $line.IndexOf(",")
+        if ($commaIndex -lt 0) {
             continue
         }
 
-        $parts = $line -split ",", 2
-        $rawName = $parts[0].TrimEnd("`r")
-        $rawContent = $parts[1].TrimEnd("`r")
+        $rawName = $line.Substring(0, $commaIndex).TrimEnd("`r")
+        $rawContent = $line.Substring($commaIndex + 1).TrimEnd("`r")
 
         if ([string]::IsNullOrEmpty($rawName)) {
             continue
         }
 
-        # Windows 非法文件名字符替换
-        $safeName = $rawName -replace '[<>:"/\\|?*]', "_"
+        $safeName = Get-SafeFileName -Name $rawName
         $outFile = Join-Path -Path $outputPath -ChildPath ($safeName + ".csv")
 
         Add-Content -LiteralPath $outFile -Value $rawContent -Encoding UTF8
@@ -61,23 +75,26 @@ foreach ($csvFile in $inputFiles) {
 
         if ($fileLineCounter.ContainsKey($safeName)) {
             $fileLineCounter[$safeName]++
-        } else {
+        }
+        else {
             $fileLineCounter[$safeName] = 1
         }
     }
 }
 
 Write-Host ""
-Write-Host "每个输出文件对应行数："
+Write-Host "Per output file line count:"
 foreach ($k in ($fileLineCounter.Keys | Sort-Object)) {
     Write-Host ("{0}.csv: {1}" -f $k, $fileLineCounter[$k])
 }
 
-$outputFileCount = @((Get-ChildItem -LiteralPath $outputPath -File -Filter "*.csv" -ErrorAction SilentlyContinue)).Count
+$outputFileCount = @(
+    Get-ChildItem -LiteralPath $outputPath -File -Filter "*.csv" -ErrorAction SilentlyContinue
+).Count
 
 Write-Host ""
-Write-Host "处理完成："
-Write-Host "输入文件数: $inputFileCount"
-Write-Host "读取总行数: $totalReadLines"
-Write-Host "成功写入行数: $writtenLines"
-Write-Host "输出文件数: $outputFileCount"
+Write-Host "Done:"
+Write-Host "Input file count: $inputFileCount"
+Write-Host "Total lines read: $totalReadLines"
+Write-Host "Total lines written: $writtenLines"
+Write-Host "Output file count: $outputFileCount"
