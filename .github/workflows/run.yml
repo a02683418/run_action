@@ -1,0 +1,15 @@
+name: Run PS Script
+
+on: [push]
+
+jobs:
+  run:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Run PowerShell
+        shell: powershell
+        run: |
+          ./dx_split.ps1
